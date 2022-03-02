@@ -16,6 +16,7 @@
     "unstated-next": "^1.1.0"
   },
   "dependencies": {
+    "@react-hookz/web": "^13.0.0",
     "react": "18.0.0-rc.1",
     "react-dom": "18.0.0-rc.1",
     "ts-results": "^3.3.0"

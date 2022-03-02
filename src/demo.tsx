@@ -1,8 +1,8 @@
 import type {} from "react/experimental"
 import type {} from "react-dom/experimental"
-import React, { Suspense, useState } from "react"
+import React, { Suspense, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { useAsyncFn } from "./hooks"
+import { ResourceContext, useUser } from "./hooks"
 
 createRoot(document.querySelector("#app")!).render(
     <Suspense fallback="Loading...">
@@ -10,30 +10,25 @@ createRoot(document.querySelector("#app")!).render(
     </Suspense>
 )
 
-function App () {
-    const [input, setInput] = useState("")
-    const [data, transitionNewRequest, isPending, revalidate] = useAsyncFn(
-        echo,
-        [input]
-    )
+function User ({ id }: { id: string }) {
+    const result = useUser(id)
     return (
-        <>
-            <input
-                value={input}
-                onInput={(e) => {
-                    setInput(e.currentTarget.value)
-                    transitionNewRequest(e.currentTarget.value)
-                }}
-            />
-            <br />
-            <pre style={isPending ? { opacity: 0.2 } : {}}>Result: {data}</pre>
-            <br />
-            <button onClick={revalidate}>restart</button>
-        </>
+        <div>
+            {JSON.stringify(result)}
+        </div>
     )
 }
 
-async function echo (x: string) {
-    await new Promise((r) => setTimeout(r, 200))
-    return x + `\nupdated at ${new Date().toString()}`
+function App () {
+    const ref = useRef<Map<string, any>>()
+    if (!ref.current) {
+        ref.current = new Map()
+    }
+    return (
+        <ResourceContext.Provider value={ref.current}>
+            <Suspense fallback="loading user...">
+                <User id="1" />
+            </Suspense>
+        </ResourceContext.Provider>
+    )
 }
