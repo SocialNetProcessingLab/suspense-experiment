@@ -1,98 +1,123 @@
-import { Result, Ok, Err } from "ts-results"
-import { unstable_useTransition, useCallback, useRef, useEffect } from "react"
-
 import {
-    // @ts-expect-error
-    unstable_createMutableSource as createMutableSource,
-    // @ts-expect-error
-    unstable_useMutableSource as useMutableSource,
+    MutableRefObject,
+    useCallback,
+    useRef,
+    useSyncExternalStore,
+    useTransition
 } from "react"
 
-export type State<Return, Args extends unknown[]> = [
-    result: Result<Return, unknown>,
-    transitionToNewParameter: (...args: Args) => void,
-    isPending: boolean,
-    revalidate: () => void
-]
-function takeSnapshot<T>(x: T) {
-    return { ...x }
+export const useRefOnce = <T> (f: () => T): MutableRefObject<T> => {
+    const ref = useRef<T>()
+    if (!ref.current) {
+        console.log("called current")
+        ref.current = f()
+    }
+    return ref as MutableRefObject<T>
 }
-export function useAsyncFn<Return, Args extends unknown[]>(
-    fn: (...args: Args) => Promise<Return>,
-    initialArgs: Args,
-    initialResult?: Return
-): State<Return, Args> {
-    const { pushPromise, snapshot } = useStore<Return, Args>()
-    const [start, isPending] = unstable_useTransition()
 
-    const startRequestTransition = useCallback(
-        (...args: Args) => {
-            start(() => void pushPromise(fn(...args), args))
-        },
-        [fn]
+type AnyFunction = (...args: any[]) => any
+
+type InternalStore<Data, Meta> = {
+    version: number
+    data: Data | Promise<void>
+    meta: Meta
+}
+type Destroy = () => void
+type Subscribe = (onStoreChange: () => void) => Destroy
+type GetSnapshot<T = any> = () => T
+
+export const createStore = <Data, Meta> () => {
+    const subscribers = new Set<AnyFunction>()
+    const store: InternalStore<Data, Meta> = {
+        version: -1,
+        data: null!,
+        meta: null!
+    }
+
+    const notifyAll = () => subscribers.forEach(f => f())
+
+    const subscribe: Subscribe = (onStoreChange) => {
+        console.log("subscribe", onStoreChange)
+        subscribers.add(onStoreChange)
+        return () => {
+            console.log("unsubscribe", onStoreChange)
+            subscribers.delete(onStoreChange)
+        }
+    }
+    const getSnapshot: GetSnapshot = () => store
+
+    const pushPromise = (rawPromise: Promise<Data>, meta: Meta) => {
+        console.log("pushPromise", rawPromise, meta)
+        store.version++
+        store.meta = meta
+        store.data = rawPromise.then(data => {
+            console.log("getData", data)
+            store.version++
+            store.meta = meta
+            store.data = data
+            notifyAll()
+        })
+        notifyAll()
+        return store.data
+    }
+
+    return {
+        subscribe,
+        getSnapshot,
+        pushPromise
+    }
+}
+
+const store = createStore()
+export const useAsyncFunctionStore = <Data, Meta> () => {
+    const snapshot = useSyncExternalStore<InternalStore<Data, Meta>>(
+        store.subscribe,
+        store.getSnapshot
     )
-    const revalidate = useCallback(() => {
-        startRequestTransition(...snapshot.meta)
-    }, [startRequestTransition, snapshot.version])
+    return {
+        snapshot,
+        pushPromise: store.pushPromise
+    }
+}
 
+export type State<Data, Args extends unknown[]> = [
+    result: Data,
+    execute: (...args: Args) => void,
+    isPending: boolean,
+    reset: () => void
+]
+
+export const useAsyncFn = <Data, Args extends unknown[]> (
+    fn: (...args: Args) => Promise<Data>,
+    initialArgs: Args
+) => {
+    const { snapshot, pushPromise } = useAsyncFunctionStore<Data, Args>()
+    const [isPending, start] = useTransition()
+    const transitionNewRequest = useCallback((...args: Args) => {
+        start(() => {
+            pushPromise(fn(...args), args).then(() => {
+                console.log("resolved")
+            })
+        })
+    }, [fn])
+    const revalidate = useCallback(() => {
+        transitionNewRequest(...snapshot.meta)
+    }, [])
     const ref = useRef({ init: false })
     if (snapshot.version === -1) {
         if (!ref.current.init) {
-            startRequestTransition(...initialArgs)
+            console.log("call first")
+            transitionNewRequest(...initialArgs)
             ref.current.init = true
         }
-        if (initialResult !== undefined) {
-            return [Ok(initialResult), startRequestTransition, true, revalidate]
-        }
+        // we don't need initialResult in our library
     }
-    if ("val" in snapshot.data) return [snapshot.data, startRequestTransition, isPending, revalidate]
+    // have result
+    if (!(snapshot.data instanceof Promise)) return [
+        snapshot.data,
+        transitionNewRequest,
+        isPending,
+        revalidate
+    ] as const
     throw snapshot.data
-}
-
-type InternalStore<T, M> = {
-    version: number
-    data: Result<T, unknown> | Promise<void>
-    meta: M
-}
-function createAsyncMutableStore<T, M>() {
-    const subscribers = new Set<Function>()
-    const store: InternalStore<T, M> = {
-        version: -1,
-        data: null!,
-        meta: null!,
-    }
-    const source: unknown = createMutableSource(store, () => store.version)
-
-    function notify() {
-        subscribers.forEach((f) => f())
-    }
-    function subscribe(_snapshot: InternalStore<T, M>, f: Function) {
-        subscribers.add(f)
-        return () => subscribers.delete(f)
-    }
-    function pushPromise(rawPromise: Promise<T>, meta: M) {
-        store.version++
-        store.meta = meta
-        const promise = (store.data = Result.wrapAsync(() => rawPromise).then((val) => {
-            store.version++
-            store.meta = meta
-            store.data = val
-            notify()
-        }))
-        notify()
-        return promise
-    }
-    return { pushPromise, source, subscribe }
-}
-
-function useStore<T, M>() {
-    const { pushPromise, source, subscribe } = useRefOnce(() => createAsyncMutableStore())
-    const snapshot: Readonly<InternalStore<T, M>> = useMutableSource(source, takeSnapshot, subscribe)
-    return { snapshot, pushPromise }
-}
-
-function useRefOnce<T>(f: () => T): T {
-    const ref = useRef<T>()
-    if (!ref.current) ref.current = f()
-    return ref.current
 }

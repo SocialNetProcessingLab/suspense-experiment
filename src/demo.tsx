@@ -1,19 +1,21 @@
 import type {} from "react/experimental"
 import type {} from "react-dom/experimental"
 import React, { Suspense, useState } from "react"
-import { unstable_createRoot } from "react-dom"
+import { createRoot } from "react-dom/client"
 import { useAsyncFn } from "./hooks"
-import {} from "ts-results"
 
-unstable_createRoot(document.querySelector("#app")!).render(
+createRoot(document.querySelector("#app")!).render(
     <Suspense fallback="Loading...">
         <App />
     </Suspense>
 )
-function App() {
+
+function App () {
     const [input, setInput] = useState("")
-    const [result, transitionNewRequest, isPending, revalidate] = useAsyncFn(echo, [""], "")
-    const data = result.unwrap()
+    const [data, transitionNewRequest, isPending, revalidate] = useAsyncFn(
+        echo,
+        [input]
+    )
     return (
         <>
             <input
@@ -26,12 +28,12 @@ function App() {
             <br />
             <pre style={isPending ? { opacity: 0.2 } : {}}>Result: {data}</pre>
             <br />
-            <button onClick={revalidate}>Revalidate</button>
+            <button onClick={revalidate}>restart</button>
         </>
     )
 }
 
-async function echo(x: string) {
+async function echo (x: string) {
     await new Promise((r) => setTimeout(r, 200))
     return x + `\nupdated at ${new Date().toString()}`
 }
